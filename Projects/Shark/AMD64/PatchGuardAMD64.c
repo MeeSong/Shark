@@ -25,8 +25,8 @@
 #include "Space.h"
 #include "Stack.h"
 
-#define __ROL64(x, n) (((x) << ((n % 64))) | ((x) >> (64 - (n % 64))))
-#define __ROR64(x, n) (((x) >> ((n % 64))) | ((x) << (64 - (n % 64))))
+#define __ROL64(x, n) (((x) << ((( n & 0xFF) % 64))) | ((x) >> (64 - (( n & 0xFF) % 64))))
+#define __ROR64(x, n) (((x) >> ((( n & 0xFF) % 64))) | ((x) << (64 - (( n & 0xFF) % 64))))
 
 #define GetGpBlock(pgblock) \
             ((PGPBLOCK)((PCHAR)pgblock - sizeof(GPBLOCK)))
@@ -86,6 +86,9 @@ InitializePgBlock(
 
     CHAR Header[] =
         "55 41 54 41 55 41 56 41 57 48 81 EC C0 02 00 00 48 8D A8 D8 FD FF FF 48 83 E5 80";
+
+    CHAR HeaderEx[] =
+        "55 41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC B0 00 00 00";
 
     ULONG64 SdbpCheckDll[] = {
         0x7c8b483024748b48, 0x333824548b4c2824,
@@ -251,10 +254,18 @@ InitializePgBlock(
                     }
                 }
 
-                ControlPc = ScanBytes(
-                    ViewBase,
-                    (PCHAR)ViewBase + ViewSize,
-                    Header);
+                if (GetGpBlock(PgBlock)->BuildNumber < 18362) {
+                    ControlPc = ScanBytes(
+                        ViewBase,
+                        (PCHAR)ViewBase + ViewSize,
+                        Header);
+                }
+                else {
+                    ControlPc = ScanBytes(
+                        ViewBase,
+                        (PCHAR)ViewBase + ViewSize,
+                        HeaderEx);
+                }
 
                 if (NULL != ControlPc) {
                     TargetPc = ControlPc + Diff;
