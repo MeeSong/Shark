@@ -1,5 +1,5 @@
 # Shark
-    Turn off PatchGuard in real time for win7 (7600) ~ win10 (18950).
+    Turn off PatchGuard in real time for win7 (7600) ~ win10 (19041).
 
 # Create labs
     md X:\Labs
@@ -24,6 +24,3 @@
     findpg, https://github.com/tandasat/findpg
     PgResarch, https://github.com/tandasat/PgResarch
     UPGDSED, https://github.com/hfiref0x/UPGDSED
-
-# Note
-    祖国生日快乐!
