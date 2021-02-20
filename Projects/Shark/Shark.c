@@ -26,11 +26,6 @@
 #include "PatchGuard.h"
 #include "Space.h"
 
-#pragma section( ".block", read, write, execute )
-
-__declspec(allocate(".block")) GPBLOCK GpBlock = { 0 };
-__declspec(allocate(".block")) PGBLOCK PgBlock = { 0 };
-
 // #ifdef ALLOC_PRAGMA
 // #pragma alloc_text(PAGE, DriverEntry)
 // #endif
@@ -87,6 +82,8 @@ DriverEntry(
     PDEVICE_OBJECT DeviceObject = NULL;
     UNICODE_STRING DeviceName = { 0 };
     UNICODE_STRING SymbolicLinkName = { 0 };
+    PMMPTE PointerPte = NULL;
+    PFN_NUMBER NumberOfPages = 0;
 
     RtlInitUnicodeString(&DeviceName, DEVICE_STRING);
 
@@ -113,15 +110,25 @@ DriverEntry(
         if (NT_SUCCESS(Status)) {
             DriverObject->DriverUnload = (PDRIVER_UNLOAD)DriverUnload;
 
-            GpBlock.PgBlock = &PgBlock;
-            PgBlock.GpBlock = &GpBlock;
-
-            InitializeGpBlock(&GpBlock);
-            InitializeSpace(&GpBlock);
-
 #ifndef PUBLIC
             DbgPrint("[Shark] load\n");
 #endif // !PUBLIC
+
+            GpBlock = ExAllocatePool(
+                NonPagedPool,
+                sizeof(GPBLOCK) + sizeof(PGBLOCK));
+
+            if (NULL != GpBlock) {
+                RtlZeroMemory(
+                    GpBlock,
+                    sizeof(GPBLOCK) + sizeof(PGBLOCK));
+
+                GpBlock->PgBlock = __utop(GpBlock + 1);
+                GpBlock->PgBlock->GpBlock = __utop(GpBlock);
+
+                InitializeGpBlock(GpBlock);
+                InitializeSpace(GpBlock);
+            }
         }
         else {
             IoDeleteDevice(DeviceObject);
@@ -238,7 +245,7 @@ DeviceControl(
 
     switch (IrpSp->Parameters.DeviceIoControl.IoControlCode) {
     case 0: {
-        PgClear(&PgBlock);
+        PgClear(GpBlock->PgBlock);
 
         Irp->IoStatus.Information = 0;
 

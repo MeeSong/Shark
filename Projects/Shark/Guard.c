@@ -23,18 +23,6 @@
 #include "Scan.h"
 #include "Reload.h"
 
-#pragma section( ".guard", read, write, execute )
-
-#pragma pack (push, 1)
-__declspec(allocate(".guard")) struct {
-    RTL_BITMAP BitMap;
-    u8 Bits[0x100];
-    u8 Bytes[4 * PAGE_SIZE - 0x100 - sizeof(RTL_BITMAP)];
-}Trampoline = { 0x100, __utop(&Trampoline.Bytes) };
-#pragma pack (pop)
-
-C_ASSERT(sizeof(Trampoline) == 4 * PAGE_SIZE);
-
 ptr
 NTAPI
 GuardAllocateTrampoline(
@@ -42,17 +30,13 @@ GuardAllocateTrampoline(
 )
 {
     ptr Result = NULL;
-    u32 HintIndex = 0;
 
-    NumberOfBytes = (NumberOfBytes + 7) & ~7;
+    Result = ExAllocatePool(
+        NonPagedPool,
+        NumberOfBytes);
 
-    HintIndex = RtlFindClearBitsAndSet(
-        &Trampoline.BitMap,
-        NumberOfBytes / 8,
-        HintIndex);
-
-    if (MAXULONG != HintIndex) {
-        Result = Trampoline.Bytes + HintIndex * 8;
+    if (NULL != Result) {
+        RtlZeroMemory(Result, NumberOfBytes);
     }
 
     return Result;
@@ -65,17 +49,7 @@ GuardFreeTrampoline(
     __in u8 NumberOfBytes
 )
 {
-    u32 HintIndex = 0;
-
-    NumberOfBytes = (NumberOfBytes + 7) & ~7;
-
-    HintIndex =
-        ((u8ptr)BaseAddress - Trampoline.Bytes) / 8;
-
-    RtlClearBits(
-        &Trampoline.BitMap,
-        HintIndex,
-        NumberOfBytes / 8);
+    ExFreePool(BaseAddress);
 }
 
 void
@@ -379,7 +353,7 @@ HotpatchDetach(
         sizeof(ptr));
 
     GuardFreeTrampoline(HotpatchObjct, HotpatchObjct->Header.Length);
-}
+        }
 #endif // !_WIN64
 
 PPATCH_HEADER
