@@ -368,7 +368,7 @@ InitializePgBlock(
     s8 ReservedCrossThreadFlags[] =
         "89 83 ?? ?? F0 83 0C 24 00 80 3D ?? ?? ?? ?? ?? 0F";
 
-    u64 Btc64[] = { 0xC3C18B48D1BB0F48 };
+    u64 Btc64[] = { 0xC3C3C0BB0F489148 };
     u64 Rol64[] = { 0xC3C0D348CA869148 };
     u64 Ror64[] = { 0xC3C8D348CA869148 };
 
@@ -806,6 +806,8 @@ InitializePgBlock(
 
         if (NULL != ControlPc) {
             PgBlock->Pool.PoolBigPageTable =
+                GetGpBlock(PgBlock)->BuildNumber < 9200 ?
+                __rva_to_va_ex(ControlPc + 3, 1) :
                 __rva_to_va(ControlPc
                     + (GetGpBlock(PgBlock)->BuildNumber >= 9200 ? 8 : 3));
 
@@ -1188,48 +1190,57 @@ PgSetNewEntryWithBtc(
     }
 
 found:
-    FieldIndex = Index - (0 == (AlignOffset & 7) ? 0 : 1);
-    LastRorKeyOffset = 2 + (0 == (AlignOffset & 7) ? 0 : 1);
-
-    RtlCopyMemory(
-        FieldBuffer,
-        (u8ptr)Context + PgBlock->SizeCmpAppendDllSection + FieldIndex * 8,
-        sizeof(FieldBuffer));
-
-    RorKey = LastRorKey;
-    Index = LastRorKeyOffset;
-
-    while (Index--) {
-        FieldBuffer[Index] = FieldBuffer[Index] ^ RorKey;
-        RorKey = ROR64(PgBlock, RorKey, FieldIndex + Index);
-        RorKey = PgBlock->Btc64(RorKey, RorKey);
+    if (Index == CompareCount) {
+#ifdef DEBUG
+        vDbgPrint(
+            "[Shark] [PatchGuard] < %p > entrypoint not found!\n",
+            Object);
+#endif // DEBUG
     }
+    else {
+        FieldIndex = Index - (0 == (AlignOffset & 7) ? 0 : 1);
+        LastRorKeyOffset = 2 + (0 == (AlignOffset & 7) ? 0 : 1);
 
-    // set temp buffer PatchGuard entry head jmp to PgClearCallback and encrypt
+        RtlCopyMemory(
+            FieldBuffer,
+            (u8ptr)Context + PgBlock->SizeCmpAppendDllSection + FieldIndex * 8,
+            sizeof(FieldBuffer));
 
-    Pointer = (PGUARD_BODY)((u8ptr)FieldBuffer + 8 - AlignOffset);
+        RorKey = LastRorKey;
+        Index = LastRorKeyOffset;
 
-    LockedBuildJumpCode(&Pointer, &Object->Body);
+        while (Index--) {
+            FieldBuffer[Index] = FieldBuffer[Index] ^ RorKey;
+            RorKey = ROR64(PgBlock, RorKey, FieldIndex + Index);
+            RorKey = PgBlock->Btc64(RorKey, RorKey);
+        }
 
-    RorKey = LastRorKey;
-    Index = LastRorKeyOffset;
+        // set temp buffer PatchGuard entry head jmp to PgClearCallback and encrypt
 
-    while (Index--) {
-        FieldBuffer[Index] = FieldBuffer[Index] ^ RorKey;
-        RorKey = ROR64(PgBlock, RorKey, FieldIndex + Index);
-        RorKey = PgBlock->Btc64(RorKey, RorKey);
-    }
+        Pointer = (PGUARD_BODY)((u8ptr)FieldBuffer + 8 - AlignOffset);
 
-    RtlCopyMemory(
-        (u8ptr)Context + PgBlock->SizeCmpAppendDllSection + FieldIndex * 8,
-        FieldBuffer,
-        sizeof(FieldBuffer));
+        LockedBuildJumpCode(&Pointer, &Object->Body);
+
+        RorKey = LastRorKey;
+        Index = LastRorKeyOffset;
+
+        while (Index--) {
+            FieldBuffer[Index] = FieldBuffer[Index] ^ RorKey;
+            RorKey = ROR64(PgBlock, RorKey, FieldIndex + Index);
+            RorKey = PgBlock->Btc64(RorKey, RorKey);
+        }
+
+        RtlCopyMemory(
+            (u8ptr)Context + PgBlock->SizeCmpAppendDllSection + FieldIndex * 8,
+            FieldBuffer,
+            sizeof(FieldBuffer));
 
 #ifdef DEBUG
-    vDbgPrint(
-        "[Shark] [PatchGuard] < %p > set new entry for btc encrypted context\n",
-        Object);
+        vDbgPrint(
+            "[Shark] [PatchGuard] < %p > set new entry for btc encrypted context\n",
+            Object);
 #endif // DEBUG
+    }
 }
 
 void
@@ -1305,21 +1316,6 @@ PgCompareFields(
 
                 if (FALSE != Chance) {
                     if (PgPoolBigPage == VaType) {
-                        PointerPde = GetPdeAddress(BaseAddress);
-
-                        if (0 == PointerPde->u.Hard.LargePage) {
-                            PointerPte = GetPteAddress(BaseAddress);
-
-                            if (1 == PointerPte->u.Hard.NoExecute) {
-                                Chance = FALSE;
-                            }
-                        }
-                        else if (1 == PointerPde->u.Hard.NoExecute) {
-                            Chance = FALSE;
-                        }
-                        else {
-                            __debugbreak();
-                        }
                     }
                     else {
                         if (ROUND_TO_PAGES(*(u64ptr)BaseAddress) != RegionSize) {
@@ -1356,7 +1352,8 @@ PgCompareFields(
             }
             else {
                 TargetPc = BaseAddress;
-                // EndAddress = (u8ptr)BaseAddress + RegionSize - sizeof(PgBlock->Fields);
+
+                // only search one page
                 EndAddress = (u8ptr)BaseAddress + PAGE_SIZE - sizeof(PgBlock->Fields);
 
                 do {
@@ -1452,7 +1449,7 @@ PgCompareFields(
                                                 PgBlock,
                                                 Object,
                                                 Context,
-                                                (u)EndAddress - (u)Context);
+                                                (u)((u8ptr)BaseAddress + RegionSize - sizeof(PgBlock->Fields)) - (u)Context);
                                         }
                                         else {
                                             for (;
@@ -1688,9 +1685,8 @@ PgClearPoolEncryptedContext(
         Index++) {
         if (POOL_BIG_TABLE_ENTRY_FREE !=
             ((u64)POOL_TABLE[Index].Va & POOL_BIG_TABLE_ENTRY_FREE)) {
-            if (FALSE !=
-                PgBlock->Pool.MmIsNonPagedSystemAddressValid(POOL_TABLE[Index].Va)) {
-                if (POOL_TABLE[Index].NumberOfPages > PgBlock->SizeINITKDBG) {
+            if (POOL_TABLE[Index].NumberOfPages >= PgBlock->SizeINITKDBG) {
+                if (0 != PgBlock->Pool.MmIsNonPagedSystemAddressValid(POOL_TABLE[Index].Va)) {
                     PgCompareFields(
                         PgBlock,
                         PgPoolBigPage,
@@ -2069,7 +2065,7 @@ PgClearAll(
         GetGpBlock(PgBlock)->BugCheckHandle = SafeGuardAttach(
             (ptr *)&GetGpBlock(PgBlock)->KeBugCheckEx,
             PgBlock->ClearCallback,
-            NULL,
+            PgBlock->CaptureContext,
             NULL,
             PgBlock);
     }
